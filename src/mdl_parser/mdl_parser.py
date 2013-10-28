@@ -5,10 +5,11 @@ import numpy
 import re
 import glob
 import operator
+import fnmatch
 import functools
 import pspgu_consts
 
-verbers = True
+verbers = False
 
 def log(str):
 	if verbers:
@@ -86,13 +87,13 @@ def parse(data, filename):
 		array.shape = (4, 4)
 		matrix2 = numpy.mat(array.copy())
 		
-		assert fvals[:16] == fvals[16:]
+		#assert fvals[:16] == fvals[16:]
 		#log("%r" % matrix1)
 
 	# vertex blocks
 	vertex_block_offset = bone_offset_base + 0xa0 * bone_count
 	vertex_data = []
-	for _ in xrange(10):
+	for _ in xrange(65535):
 		if vertex_block_offset >= len(data):
 			break
 		print "VERTEX BLOCK %d, offset=0x%x" % (_, vertex_block_offset)
@@ -102,7 +103,13 @@ def parse(data, filename):
 		vertex_format_bits = header[2]
 		vertex_count = header[3]
 		
+		header_size = 9 * 0x4
+		if header[0] == 261:	# ????
+			header_size += 2 * 0x4
+			
 		print "raw header", header
+		#print "raw_header", _G(vertex_block_offset, "<IBBHIIBBBBBBBBBBBBff")
+		
 		print "vertex count %d" % vertex_count
 		print "vertex format bits = %d" % vertex_format_bits
 		format_strings, converters = str_vertex_format(vertex_format_bits)
@@ -114,11 +121,11 @@ def parse(data, filename):
 		
 		# vertices
 		vertices = []
-		vertices_offset_base = vertex_block_offset + 9 * 0x4
+		vertices_offset_base = vertex_block_offset + header_size
 		for i in xrange(vertex_count):
 			vertex_offset = vertices_offset_base + i * total_size
-			print "===>vertex %d: offset = 0x%x" % (i, vertex_offset)
-			
+			log("===>vertex %d: offset = 0x%x" % (i, vertex_offset))
+	
 			_offset = vertex_offset
 			values = []
 			for count, size, converter in converters:
@@ -131,34 +138,36 @@ def parse(data, filename):
 			w, vt, c, n, vp = values
 			
 			if w:
-				print "w ", " ".join(map(str,w))
+				log("w " + (" ".join(map(str,w))))
 				w = w[0]
 			else:
 				w = None
 			if vt:
-				print "vt ", " ".join(map(str,vt))
+				log("vt " + (" ".join(map(str,vt))))
 				u, v = vt[:2]
 			else:
 				u, v = None, None
 			if c:
-				print "c 0x%08x" % c[0]
+				log("c 0x%08x" % c[0])
 				c = c[0]
 			else:
 				c = None
 			if n:
-				print "n ", " ".join(map(str,n))
+				log("n " + (" ".join(map(str,n))))
 				nx, ny, nz = n[:3]
 			else:
 				nx, ny, nz = None, None, None
 			if vp:
-				print "v ", " ".join(map(str,vp))
+				log("v " + (" ".join(map(str,vp))))
 				x, y, z = vp[:3]
 			else:
 				x, y, z = None, None, None
 			vertices.append((w, u, v, c, nx, ny, nz, x, y, z))
 			
 		vertex_data.append(vertices)
-		vertex_block_offset += 9 * 0x4 + vertex_count * total_size
+		vertex_block_offset += header_size + vertex_count * total_size
+		
+		# align to 32bit
 		if vertex_block_offset % 0x4 != 0:
 			vertex_block_offset += 4 - vertex_block_offset % 0x4
 	
@@ -186,6 +195,15 @@ def str_vertex_format(bits):
 			bits -= pspgu_consts.GU_WEIGHTS(i)
 			break
 	print "weight_n = %d" % weight_n
+	
+	mask = pspgu_consts.GU_VERTICES_BITS
+	vertices_n = 0
+	for i in xrange(1, 9, 1):
+		if (mask & bits) == pspgu_consts.GU_VERTICES(i):
+			vertices_n = i
+			bits -= pspgu_consts.GU_VERTICES(i)
+			break
+	print "vertices_n = %d" % vertices_n
 	
 	CHECK_ITEMS = (
 		("weight bits: %d", 0, pspgu_consts.GU_WEIGHT_BITS, weight_n, {
@@ -235,7 +253,19 @@ def str_vertex_format(bits):
 	return format_strings, converters
 		
 def dump_to_obj_file(filename, meshes):
-	f = open("%s.obj" % filename, "w")
+	vertex_map = {}
+	meshes2 = []
+	base = 0
+	for vertices in meshes:
+		_tmp = []
+		for i, vertex in enumerate(vertices):
+			if vertex not in vertex_map:
+				vertex_map[vertex] = base + i + 1
+			_tmp.append(vertex_map[vertex])
+		base += len(vertices)
+		meshes2.append(_tmp)
+			
+	f = open(filename, "w")
 	
 	f.write("# List of Vertices\n")
 	for vertices in meshes:	
@@ -252,29 +282,70 @@ def dump_to_obj_file(filename, meshes):
 	f.write("# Face Defination\n")
 	base = 0
 	for j, vertices in enumerate(meshes):
+		if False and j > 1:
+			base += len(vertices)
+			continue
 		f.write("#	 Mesh %d\n" % j)
-		for i in xrange(len(vertices)-2):
-			f.write("f %d//%d %d//%d %d//%d\n" % (base+i+1,base+i+1,base+i+2,base+i+2,base+i+3,base+i+3))
+		#for i in xrange(0, len(vertices) - 4, 2):
+		#	
+		#	k1 = meshes2[j][i]
+		#	k2 = meshes2[j][i+1]
+		#	k3 = meshes2[j][i+2]
+		#	k4 = meshes2[j][i+3]
+		#	f.write("f %d//%d %d//%d %d//%d\n" % (k1, k1, k2, k2, k3, k3))
+		#	f.write("f %d//%d %d//%d %d//%d\n" % (k2, k2, k3, k3, k4, k4))
+
+		for i in xrange(0, len(vertices)-2, 1):
+			
+			k1 = meshes2[j][i]
+			k2 = meshes2[j][(i+1) % len(vertices)]
+			k3 = meshes2[j][(i+2) % len(vertices)]
+			f.write("f %d//%d %d//%d %d//%d\n" % (k1, k1, k2, k2, k3, k3))
+			
 		base += len(vertices)
 		
 	f.close()
 	
+def do_file(mdl_file, out_file):
+	log("filename: %s" % mdl_file)
+	
+	fp = open(mdl_file, "rb")
+	data = fp.read()
+	fp.close()
+	
+	parse(data, out_file)
+	
 if __name__ == '__main__':
 	
-	
-	if os.path.isdir(sys.argv[1]):
-		for mdl_file in glob.glob(os.path.join(sys.argv[1], "*.mdl")):
-			log("filename: %s" % mdl_file)
-			f = open(mdl_file, "rb")
-			data = f.read()
-			f.close()
-			parse(data, os.path.splitext(mdl_file)[0])
+	if len(sys.argv) == 1:
+		print "No input file(*.mdl)!"
 	else:
-		
-		mdl_file = sys.argv[1]
-		log("filename: %s" % mdl_file)
-		f = open(mdl_file, "rb")
-		data = f.read()
-		f.close()
-	
-		parse(data, os.path.splitext(mdl_file)[0])
+		input = sys.argv[1]
+		if os.path.isfile(input):
+			mdl_file = input
+			if len(sys.argv) > 2:
+				out_file = sys.argv[2]
+			else:
+				out_file = os.path.splitext(mdl_file)[0] + ".obj"
+			do_file(mdl_file, out_file)
+		else:
+			mdl_folder = input
+			if len(sys.argv) > 2:
+				out_folder = sys.argv[2]
+			else:
+				out_folder_abs = os.path.abspath(mdl_folder)
+				parent_folder, folder = os.path.split(out_folder_abs)
+				out_folder = os.path.join(parent_folder, folder+"_objs")
+				
+			print "out_folder", out_folder
+			for root, dirnames, filenames in os.walk(mdl_folder):
+				for filename in fnmatch.filter(filenames, "*.mdl"):
+					mdl_file = os.path.join(root, filename)
+					folder_rel = os.path.relpath(root, mdl_folder)
+					out_file = reduce(os.path.join,
+						(out_folder, folder_rel, filename.replace(".mdl", ".obj")))
+					out_file_folder = os.path.join(out_folder, folder_rel)
+					if not os.path.exists(out_file_folder):
+						os.makedirs(out_file_folder)
+					print mdl_file, out_file
+					do_file(mdl_file, out_file)
