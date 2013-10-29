@@ -187,22 +187,15 @@ F16CONV = make_converter("<h", 256.0)
 F32CONV = make_converter("<f")
 
 def str_vertex_format(bits):
-	mask = pspgu_consts.GU_WEIGHTS_BITS
-	weight_n = 0
-	for i in xrange(1, 9, 1):
-		if (mask & bits) == pspgu_consts.GU_WEIGHTS(i):
-			weight_n = i
-			bits -= pspgu_consts.GU_WEIGHTS(i)
-			break
-	print "weight_n = %d" % weight_n
+	WEIGHTS_CONSTS = map(pspgu_consts.GU_WEIGHTS, range(1, 9, 1))
+	weight_n = WEIGHTS_CONSTS.index(bits & pspgu_consts.GU_WEIGHTS_BITS) + 1
+	bits -= pspgu_consts.GU_WEIGHTS(weight_n)
 	
-	mask = pspgu_consts.GU_VERTICES_BITS
-	vertices_n = 0
-	for i in xrange(1, 9, 1):
-		if (mask & bits) == pspgu_consts.GU_VERTICES(i):
-			vertices_n = i
-			bits -= pspgu_consts.GU_VERTICES(i)
-			break
+	VERTICES_CONSTS = map(pspgu_consts.GU_VERTICES, range(1, 9, 1))
+	vertices_n = VERTICES_CONSTS.index(bits & pspgu_consts.GU_VERTICES_BITS) + 1
+	bits -= pspgu_consts.GU_VERTICES(vertices_n)
+	
+	print "weights_n = %d" % weight_n
 	print "vertices_n = %d" % vertices_n
 	
 	CHECK_ITEMS = (
