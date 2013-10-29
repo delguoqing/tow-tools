@@ -47,9 +47,29 @@ def get_pixel_size(pixel_format):
 		return PIXEL_SIZE[pixel_format]
 	raise Exception("unsupported pixel format!!")
 
-def unswizzle(data, width, height):
-	pass
-
+def unswizzle(data, pixel_size, width, height):
+	assert len(data) * pixel_size % (16 * 8) == 0
+	
+	block_height = 8
+	block_width = 16 / pixel_size
+	
+	x_nblock = width / block_width
+	y_nblock = height / block_height
+	
+	dst = [None] * len(data)
+	src_offset=  0
+	for y_block in xrange(y_nblock):
+		for x_block in xrange(x_nblock):
+			block_offset = y_block * 8 * width + x_block * block_width
+			for i in xrange(8):
+				line_offset = block_offset + i * width
+				dst[line_offset: line_offset + block_width] = data[src_offset: src_offset + block_width]
+				src_offset += block_width
+	
+	assert len(dst) == len(data), "after unwizzled, not the same size"
+	
+	return dst
+		
 def parse(data, out_path="."):
 	def _G(offset, fmt):
 		fmt_size = struct.calcsize(fmt)
@@ -67,6 +87,7 @@ def parse(data, out_path="."):
 	pixel_size = get_pixel_size(format)
 	fmt_str = SIZE_2_FMTSTR[pixel_size]
 	raw_pixels = _G(pixel_offset, "<"+fmt_str*(width*height))
+	raw_pixels = unswizzle(raw_pixels, pixel_size, width, height)
 	conv = PIXEL_CONV[format]
 	pixels = []
 	for raw_pixel in raw_pixels:
