@@ -272,6 +272,12 @@ def dump_to_obj_file(filename, meshes):
 			nx, ny, nz = vertex[-6:-3]
 			f.write("vn %f %f %f\n" % (nx, ny, nz))
 		
+	f.write("# List of Texture Coordinates\n")
+	for vertices in meshes:
+		for vertex in vertices:
+			u, v = vertex[1:3]
+			f.write("vt %f %f\n" % (u, v))
+			
 	f.write("# Face Defination\n")
 	base = 0
 	for j, vertices in enumerate(meshes):
@@ -293,7 +299,7 @@ def dump_to_obj_file(filename, meshes):
 			k1 = meshes2[j][i]
 			k2 = meshes2[j][(i+1) % len(vertices)]
 			k3 = meshes2[j][(i+2) % len(vertices)]
-			f.write("f %d//%d %d//%d %d//%d\n" % (k1, k1, k2, k2, k3, k3))
+			f.write("f %d/%d/%d %d/%d/%d %d/%d/%d\n" % (k1, k1, k1, k2, k2, k2, k3, k3, k3))
 			
 		base += len(vertices)
 		
