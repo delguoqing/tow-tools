@@ -1,3 +1,5 @@
+import os
+import fnmatch
 import sys
 import struct
 import numpy
@@ -70,7 +72,7 @@ def unswizzle(data, pixel_size, width, height):
 	
 	return dst
 		
-def parse(data, out_path="."):
+def parse(data, out_file):
 	def _G(offset, fmt):
 		fmt_size = struct.calcsize(fmt)
 		return struct.unpack(fmt, data[offset: offset + fmt_size])
@@ -82,6 +84,7 @@ def parse(data, out_path="."):
 	
 	width, height, format = _G(0x4, "<HHH")
 	width, height = _G(0xc, "<HH")
+	
 	# get pixel
 	pixel_offset = 0x20
 	pixel_size = get_pixel_size(format)
@@ -110,6 +113,7 @@ def parse(data, out_path="."):
 		
 		format, num_blocks = _G(clut_offset+0x4, "<HH")
 		palette_size = num_blocks * 8
+		print "palette_size", palette_size
 		pixel_size = get_pixel_size(format)
 		fmt_str = SIZE_2_FMTSTR[pixel_size]
 		raw_pixels = _G(clut_offset+0x10, "<"+fmt_str*palette_size)
@@ -117,6 +121,10 @@ def parse(data, out_path="."):
 		clut = map(conv, raw_pixels)
 		
 		for index in indices:
+			# sometimes pixel index out of range, is it just a error?
+			if index >= len(clut):
+				index = len(clut) - 1
+				print "[warning] pixel index out of bound!"
 			pixels.append(clut[index])
 		
 	# dump pixels to image file
@@ -125,14 +133,54 @@ def parse(data, out_path="."):
 		buf += struct.pack("I", pixel)
 	
 	image = Image.fromstring("RGBA", (width, height), buf)
-	image.save("test.png")
+	image.save(out_file)
 	
-if __name__ == '__main__':
-	ppt_file = sys.argv[1]
-	
-	
-	fp = open(ppt_file, "rb")
+def do_file(in_file, out_file):
+	fp = open(in_file, "rb")
 	data = fp.read()
 	fp.close()
 	
-	parse(data)
+	parse(data, out_file)
+
+if __name__ == '__main__':
+	#ppt_file = sys.argv[1]
+	#
+	#
+	#fp = open(ppt_file, "rb")
+	#data = fp.read()
+	#fp.close()
+	#
+	#parse(data)
+	
+	if len(sys.argv) == 1:
+		print "No input file(*.ppt)!"
+	else:
+		input = sys.argv[1]
+		if os.path.isfile(input):
+			mdl_file = input
+			if len(sys.argv) > 2:
+				out_file = sys.argv[2]
+			else:
+				out_file = os.path.splitext(mdl_file)[0] + ".tga"
+			do_file(mdl_file, out_file)
+		else:
+			mdl_folder = input
+			if len(sys.argv) > 2:
+				out_folder = sys.argv[2]
+			else:
+				out_folder_abs = os.path.abspath(mdl_folder)
+				parent_folder, folder = os.path.split(out_folder_abs)
+				out_folder = os.path.join(parent_folder, folder+"_tex")
+				
+			#print "out_folder", out_folder
+			for root, dirnames, filenames in os.walk(mdl_folder):
+				for filename in fnmatch.filter(filenames, "*.ppt"):
+					mdl_file = os.path.join(root, filename)
+					folder_rel = os.path.relpath(root, mdl_folder)
+					out_file = reduce(os.path.join,
+						(out_folder, folder_rel, filename.replace(".ppt", ".tga")))
+					out_file_folder = os.path.join(out_folder, folder_rel)
+					if not os.path.exists(out_file_folder):
+						os.makedirs(out_file_folder)
+					print mdl_file, out_file
+					do_file(mdl_file, out_file)	
