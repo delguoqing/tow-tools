@@ -276,7 +276,7 @@ def dump_to_obj_file(filename, meshes):
 	for vertices in meshes:
 		for vertex in vertices:
 			u, v = vertex[1:3]
-			f.write("vt %f %f\n" % (u, v))
+			f.write("vt %f %f\n" % (u, 1.0 - v))
 			
 	f.write("# Face Defination\n")
 	base = 0
