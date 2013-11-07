@@ -38,16 +38,58 @@ def parse(data):
 		bone_name_2_offset[bone_name] = ani_offset
 		
 	last_off = None
+	key_count = 0
 	for bone_name, ani_offset in sorted(bone_name_2_offset.items(), key=operator.itemgetter(1)):
 		if last_off is not None:
-			print "\tsize = 0x%x" % (ani_offset - last_off)	
+			print "\tsize = 0x%x" % (ani_offset - last_off)
+			
+			remain_float_count = (ani_offset - last_off - 0x8 - 0x4 * key_count) / 0x4
+			print "remaining floats(%d): @ offset = 0x%x" % (remain_float_count, ani_offset - remain_float_count * 0x4)
+			remain_floats = _G(ani_offset - remain_float_count * 0x4, "<" + "f" * remain_float_count)
+				
+					
 		print "@offset:0x%x \t%s" % (ani_offset, bone_name)
 		last_off = ani_offset
 		
-		print _G(ani_offset, "<IIIHH")
+		# guess
+		key_count, unknown = _G(ani_offset, "<II")
+		print "key_frame_count = %d" % (key_count, )
+		
+		if True or unknown != 0x7:
+			print "==============>unknown = 0x%x" % unknown
+		#assert unknown == 7, str(unknown)
+		print "key frames @: ", ",".join(map(repr, _G(ani_offset + 0x8, "<" + "I" * key_count)))
+		
+		unknown2, = _G(ani_offset + 0x8 + 0x4 * key_count, "<I")
+		unknown2_half = (unknown2 >> 16)
+		assert unknown2_half == unknown, ("what?0x%x" % unknown2_half)
+		#assert unknown2 == 0x70000, str(unknown2)
+		if True or unknown2 != 0x70000:
+			print "==============>unknown2 = 0x%x" % unknown2
+		
+		key_frame_offset = ani_offset + 0x8 + 0x4 * key_count
+		for key_index in xrange(key_count):
+			flag1, flag2 = _G(key_frame_offset, "<HH")
+			key_frame_offset += 4
+			print "0x%x, 0x%x" % (flag1, flag2)
+			if flag2 == 0x7:
+				float_count = 10
+			elif flag2 == 0x2:
+				float_count = 4
+			elif flag2 == 0x3:
+				float_count = 7
+			elif flag2 == 0x1:
+				float_count = 3
+			else:
+				assert False, "unknown flag !!! %d @ 0x%x" % (flag2, key_frame_offset)
+			print _G(key_frame_offset, "<" + "f" * float_count)
+			key_frame_offset += 0x4 * float_count
 		
 if __name__ == '__main__':
 	input = sys.argv[1]
+	
+	744
+	11
 	
 	
 	fp = open(sys.argv[1], "rb")
