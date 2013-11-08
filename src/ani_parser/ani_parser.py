@@ -4,6 +4,13 @@ import struct
 
 MAGIC_CODE = "ANI\x00"
 
+BIT_HAS_TRANSLATE = 0x1
+BIT_HAS_ROTATE = 0x2	# in the form of quaternion.
+						# This can be verfied easily by calculate the norm.
+						# w*w + x*x + y*y + z*z.It should be 1.0
+BIT_HAS_SCALE = 0x4
+
+
 def parse(data):
 	
 	# short cut for parsing value from 'data'
@@ -37,25 +44,17 @@ def parse(data):
 		
 		bone_name_2_offset[bone_name] = ani_offset
 		
-	last_off = None
+	print
+	
 	key_count = 0
-	for bone_name, ani_offset in sorted(bone_name_2_offset.items(), key=operator.itemgetter(1)):
-		if last_off is not None:
-			print "\tsize = 0x%x" % (ani_offset - last_off)
-			
-			remain_float_count = (ani_offset - last_off - 0x8 - 0x4 * key_count) / 0x4
-			print "remaining floats(%d): @ offset = 0x%x" % (remain_float_count, ani_offset - remain_float_count * 0x4)
-			remain_floats = _G(ani_offset - remain_float_count * 0x4, "<" + "f" * remain_float_count)
-				
-					
-		print "@offset:0x%x \t%s" % (ani_offset, bone_name)
-		last_off = ani_offset
+	for bone_name, ani_offset in sorted(bone_name_2_offset.items(), key=operator.itemgetter(1)):					
+		print "%s  @offset:0x%x" % (bone_name, ani_offset)
 		
 		# guess
 		key_count, unknown = _G(ani_offset, "<II")
 		print "key_frame_count = %d" % (key_count, )
 		
-		if True or unknown != 0x7:
+		if unknown != 0x7:
 			print "==============>unknown = 0x%x" % unknown
 		#assert unknown == 7, str(unknown)
 		print "key frames @: ", ",".join(map(repr, _G(ani_offset + 0x8, "<" + "I" * key_count)))
@@ -64,33 +63,51 @@ def parse(data):
 		unknown2_half = (unknown2 >> 16)
 		assert unknown2_half == unknown, ("what?0x%x" % unknown2_half)
 		#assert unknown2 == 0x70000, str(unknown2)
-		if True or unknown2 != 0x70000:
+		if unknown2 != 0x70000:
 			print "==============>unknown2 = 0x%x" % unknown2
 		
 		key_frame_offset = ani_offset + 0x8 + 0x4 * key_count
 		for key_index in xrange(key_count):
 			flag1, flag2 = _G(key_frame_offset, "<HH")
 			key_frame_offset += 4
-			print "0x%x, 0x%x" % (flag1, flag2)
-			if flag2 == 0x7:
-				float_count = 10
-			elif flag2 == 0x2:
-				float_count = 4
-			elif flag2 == 0x3:
-				float_count = 7
-			elif flag2 == 0x1:
-				float_count = 3
-			else:
-				assert False, "unknown flag !!! %d @ 0x%x" % (flag2, key_frame_offset)
-			print _G(key_frame_offset, "<" + "f" * float_count)
+			print "key@frame %4d, flags=0x%x" % (flag1, flag2)
+			
+			float_count = 0
+			if flag2 & BIT_HAS_TRANSLATE:
+				float_count += 3
+			if flag2 & BIT_HAS_ROTATE:
+				float_count += 4
+			if flag2 & BIT_HAS_SCALE:
+				float_count += 3
+				
+			floats = _G(key_frame_offset, "<" + "f" * float_count)
+			#print floats
+			
+			if flag2 & BIT_HAS_TRANSLATE:
+				print "\ttranslate: (%f, %f, %f)" % (floats[:3])
+				floats = floats[3:]
+				
+			if flag2 & BIT_HAS_ROTATE:
+				assert abs(calc_sum_of_squares(floats[:4]) - 1.0) < 1e-6, "quaternion norm should be 1.0"
+				print "\trotate: (%f, %f, %f, %f)" % floats[:4]
+				floats = floats[4:]
+				
+			if flag2 & BIT_HAS_SCALE:
+				print "\tscale: (%f, %f, %f)" % floats[:3]
+				floats = floats[3:]
+				
 			key_frame_offset += 0x4 * float_count
 		
+		print
+		
+def calc_sum_of_squares(values):
+	result = 0
+	for value in values:
+		result += value * value
+	return result
+	
 if __name__ == '__main__':
 	input = sys.argv[1]
-	
-	744
-	11
-	
 	
 	fp = open(sys.argv[1], "rb")
 	data = fp.read()
