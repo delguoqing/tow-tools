@@ -215,8 +215,11 @@ pip-log.txt
 .mr.developer.cfg
 
 #Log files
-log.txt
+log*.txt
 ani.txt
+
+#Python Files
+*.pyc
 
 #Sample files
 *.mdl

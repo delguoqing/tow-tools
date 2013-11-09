@@ -69,6 +69,8 @@ def parse(data, filename):
 	log("unknown values before bones %r" % (unks3,))
 	# bone info blocks
 	bone_offset_base = unk_offset + 0x8
+
+	bone_names = []
 	
 	for i in xrange(bone_count):
 		bone_offset = bone_offset_base + i * 0xa0
@@ -89,6 +91,7 @@ def parse(data, filename):
 		
 		#assert fvals[:16] == fvals[16:]
 		#log("%r" % matrix1)
+		bone_names.append(bone_name)
 
 	# vertex blocks
 	vertex_block_offset = bone_offset_base + 0xa0 * bone_count
@@ -96,28 +99,39 @@ def parse(data, filename):
 	for _ in xrange(65535):
 		if vertex_block_offset >= len(data):
 			break
+		print
 		print "VERTEX BLOCK %d, offset=0x%x" % (_, vertex_block_offset)
 		# vertex block header
-		header = _G(vertex_block_offset, "<IIIIIiiff")
+		header = _G(vertex_block_offset, "<IIIIHBBHHiff")
 		
+		block_total_size = header[1]
 		vertex_format_bits = header[2]
 		vertex_count = header[3]
+		weight_index_start = header[4]
+		real_weight_count = header[5]
 		
 		header_size = 9 * 0x4
-		if header[0] == 261:	# ????
+		if header[0] & 0x1:	# ????
+			header += _G(vertex_block_offset + header_size, "<ff")
 			header_size += 2 * 0x4
 			
-		print "raw header", header
-		#print "raw_header", _G(vertex_block_offset, "<IBBHIIBBBBBBBBBBBBff")
+		raw_header = header[:1] + header[6:]
+		print "raw header", raw_header
 		
 		print "vertex count %d" % vertex_count
 		print "vertex format bits = %d" % vertex_format_bits
+		print "weight index: [%d, %d]" % (weight_index_start,
+										  weight_index_start + real_weight_count)
+		print "related bones: ", "|".join(bone_names[weight_index_start: weight_index_start + real_weight_count])
+		
 		format_strings, converters = str_vertex_format(vertex_format_bits)
 		total_size = 0
 		for count, size, converter in converters:
 			total_size += count * size
-		print "total_size 0x%x" % total_size
+		print "vertex total_size 0x%x" % total_size
 		print "\n".join(format_strings)
+		
+		print "mesh total size: %d" % block_total_size
 		
 		# vertices
 		vertices = []
@@ -139,6 +153,11 @@ def parse(data, filename):
 			
 			if w:
 				log("w " + (" ".join(map(str,w))))
+				
+				assert real_weight_count <= len(w), "real weight larger than mem weight n"
+				for weight_i in w[real_weight_count:]:
+					assert weight_i == 0.0, "weight out of range! %f" % weight_i
+					
 				w = w[0]
 			else:
 				w = None
