@@ -9,7 +9,7 @@ import fnmatch
 import functools
 import pspgu_consts
 
-verbers = False
+verbers = True
 
 def log(str):
 	if verbers:
@@ -22,7 +22,7 @@ def parse(data, filename):
 	def _P(name, value_fmt, locals):
 		value_fmt = value_fmt.replace("%", "%%(%s)" % name)
 		fmt = "%s = %s" % (name, value_fmt)
-		log(fmt % locals)
+		print (fmt % locals)
 		
 	# check header
 	MAGIC_CODE = "MDL\x00"
@@ -32,24 +32,54 @@ def parse(data, filename):
 
 	# figured out stuff a.t.m
 	matrix_count, = _G(0x1c, "<I")
+	texture_count, = _G(0x20, "<I")	# texture_count??
 	bone_count, = _G(0x24, "<I")
-	unknown, = _G(0x20, "<I")	# texture_count??
-	_P("matrix_count", "%d", locals())
-	_P("bone_count", "%d", locals())
+	block_count, = _G(0x28, "<I")
 	
+	#assert matrix_count == texture_count, "not same!! %d %d" % (matrix_count, texture_count)
+	
+	_P("matrix_count", "%d", locals())
+	_P("texture_count", "%d", locals())
+	_P("bone_count", "%d", locals())
+	_P("block_count", "%d", locals())
 	
 	# matrix
-	matrix_offset_base = 0x4c + (unknown - 0x4) * 0x4
-	vertex_count, = _G(matrix_offset_base-0x4, "<I")
+	matrix_offset_base = 0x4c + (texture_count - 0x4) * 0x4
 
-	log("unknown values in between")
-	unks = _G(0x28, "<"+"I"*((matrix_offset_base-0x2c)/0x4))
-	log("%r" % (unks,))
 	
-	_P("vertex_count", "%d", locals())
+	unks = _G(0x2c, "<"+"I"*((matrix_offset_base-0x2c)/0x4))
+	txl_ref = unks[2: 2 + texture_count]
+	
+	p1 = unks[:2]
+	p2 = unks[2 + texture_count:]
+	
+	#print
+	print "unk part1 %r" % (p1, )
+	print "unk_part2 %r" % (p2, )
+	
+	#assert p1[0] == 1 and p2[0] == 2, "%d, %d" % (p1[0], p2[0])
+	#assert p1[1] == texture_count * 4 + 8, "just guessing~!"
+	
+	matrix_block_size = p2[1]
+	
+	
+	print
 	log("matrix offset base = 0x%x" % matrix_offset_base)
-	for i in xrange(matrix_count):
-		matrix_offset = matrix_offset_base + i * 0x3c
+	print "matrix block size = 0x%x" % matrix_block_size
+	
+	print "txl ref = ", txl_ref
+	
+	matrix_offset = matrix_offset_base
+	for i in xrange(texture_count):
+	
+		if i >= texture_count - matrix_count:
+			print "extended:", _G(matrix_offset, "<IH")
+			material_name, = _G(matrix_offset + 0x6, "<12s")
+			material_name = material_name.rstrip("\x00")
+			print "mat name: %s" % material_name
+			
+			matrix_offset += 18
+			
 		array = numpy.array(_G(matrix_offset, "<ffffffffffff") + (0, 0, 0, 1))
 		array.shape = (4, 4)
 		matrix = numpy.array(array.copy())
@@ -58,18 +88,26 @@ def parse(data, filename):
 		unks2 = _G(unk_offset, "<iHHBBBB")
 		log("unknown values following: %r\n" % (unks2,))
 
+		matrix_offset += 0x3c
+		#assert unks2[3] == txl_ref[i], "txl ref not correct!"
 	#	if unks[i+3] != unks2[3]:
 	#		print "test failed"
 	#		return
 	#
 	#print "test ok"
 	
+	# after texture matrix and before bone info
 	unk_offset = matrix_offset_base + matrix_count * (12+3) * 0x4
 	unks3 = _G(unk_offset, "<II")
-	log("unknown values before bones %r" % (unks3,))
+	print "unknown values before bones %r" % (unks3,)
+	
 	# bone info blocks
-	bone_offset_base = unk_offset + 0x8
-
+	#bone_offset_base = unk_offset + 0x8
+	bone_offset_base = matrix_offset_base + matrix_block_size
+	print
+	print "bone_offset_base = 0x%x" % bone_offset_base
+	#assert bone_offset_base == matrix_offset_base + matrix_block_size, "mat block size wrong!"
+	
 	bone_names = []
 	
 	for i in xrange(bone_count):
@@ -96,33 +134,40 @@ def parse(data, filename):
 	# vertex blocks
 	vertex_block_offset = bone_offset_base + 0xa0 * bone_count
 	vertex_data = []
-	for _ in xrange(65535):
+	for _ in xrange(block_count):
 		if vertex_block_offset >= len(data):
 			break
 		print
 		print "VERTEX BLOCK %d, offset=0x%x" % (_, vertex_block_offset)
 		# vertex block header
-		header = _G(vertex_block_offset, "<IIIIHBBHHiff")
+		header = _G(vertex_block_offset, "<IIIIHBBbbbbbbbbff")
 		
 		block_total_size = header[1]
 		vertex_format_bits = header[2]
 		vertex_count = header[3]
-		weight_index_start = header[4]
+		texture_index = header[4]
 		real_weight_count = header[5]
+		#assert header[6] == 0, "must be zero!! %d" % header[6]
+		related_bone_indices = header[7: 7 + real_weight_count]
 		
 		header_size = 9 * 0x4
 		if header[0] & 0x1:	# ????
+			sys.stderr.write("special bit")
 			header += _G(vertex_block_offset + header_size, "<ff")
 			header_size += 2 * 0x4
 			
-		raw_header = header[:1] + header[6:]
+		#bone_bits_values = header[7:11]
+		#for bone_bits_value in bone_bits_values:
+		#	print bin(bone_bits_value)
+		
+		raw_header = header[:1] + header[15:]
 		print "raw header", raw_header
 		
 		print "vertex count %d" % vertex_count
+		print "texture index %d" % texture_index
 		print "vertex format bits = %d" % vertex_format_bits
-		print "weight index: [%d, %d]" % (weight_index_start,
-										  weight_index_start + real_weight_count)
-		print "related bones: ", "|".join(bone_names[weight_index_start: weight_index_start + real_weight_count])
+		print "related bones: ", "|".join([bone_names[related_bone_index] for related_bone_index in related_bone_indices])
+		
 		
 		format_strings, converters = str_vertex_format(vertex_format_bits)
 		total_size = 0
@@ -138,7 +183,7 @@ def parse(data, filename):
 		vertices_offset_base = vertex_block_offset + header_size
 		for i in xrange(vertex_count):
 			vertex_offset = vertices_offset_base + i * total_size
-			log("===>vertex %d: offset = 0x%x" % (i, vertex_offset))
+			#log("===>vertex %d: offset = 0x%x" % (i, vertex_offset))
 	
 			_offset = vertex_offset
 			values = []
@@ -152,7 +197,7 @@ def parse(data, filename):
 			w, vt, c, n, vp = values
 			
 			if w:
-				log("w " + (" ".join(map(str,w))))
+				#log("w " + (" ".join(map(str,w))))
 				
 				assert real_weight_count <= len(w), "real weight larger than mem weight n"
 				for weight_i in w[real_weight_count:]:
@@ -162,22 +207,22 @@ def parse(data, filename):
 			else:
 				w = None
 			if vt:
-				log("vt " + (" ".join(map(str,vt))))
+				#log("vt " + (" ".join(map(str,vt))))
 				u, v = vt[:2]
 			else:
 				u, v = None, None
 			if c:
-				log("c 0x%08x" % c[0])
+				#log("c 0x%08x" % c[0])
 				c = c[0]
 			else:
 				c = None
 			if n:
-				log("n " + (" ".join(map(str,n))))
+				#log("n " + (" ".join(map(str,n))))
 				nx, ny, nz = n[:3]
 			else:
 				nx, ny, nz = None, None, None
 			if vp:
-				log("v " + (" ".join(map(str,vp))))
+				#log("v " + (" ".join(map(str,vp))))
 				x, y, z = vp[:3]
 			else:
 				x, y, z = None, None, None
