@@ -9,13 +9,30 @@ import fnmatch
 import functools
 import pspgu_consts
 
+sys.path.append("../ppt_parser")
+import ppt_parser
+
 verbers = True
 
 def log(str):
 	if verbers:
 		print str
 		
-def parse(data, filename):
+def parse_txl(data):
+	offset = 0x10
+	texture_count, = struct.unpack("<I", data[offset: offset + 0x4])
+	offset += 0x4
+	
+	res = []
+	for i in xrange(texture_count):
+		txl_name, = struct.unpack("<32s", data[offset: offset + 0x20])
+		txl_name = txl_name.rstrip("\x00").replace(".ppt", ".png")
+		offset += 0x20
+		res.append(txl_name)
+		
+	return res
+		
+def parse(data, txl_data, filename):
 	def _G(offset, fmt):
 		fmt_size = struct.calcsize(fmt)
 		return struct.unpack(fmt, data[offset: offset + fmt_size])
@@ -72,13 +89,13 @@ def parse(data, filename):
 	matrix_offset = matrix_offset_base
 	for i in xrange(texture_count):
 	
-		if i >= texture_count - matrix_count:
-			print "extended:", _G(matrix_offset, "<IH")
-			material_name, = _G(matrix_offset + 0x6, "<12s")
-			material_name = material_name.rstrip("\x00")
-			print "mat name: %s" % material_name
-			
-			matrix_offset += 18
+		#if i >= texture_count - matrix_count:
+		#	print "extended:", _G(matrix_offset, "<IH")
+		#	material_name, = _G(matrix_offset + 0x6, "<12s")
+		#	material_name = material_name.rstrip("\x00")
+		#	print "mat name: %s" % material_name
+		#	
+		#	matrix_offset += 18
 			
 		array = numpy.array(_G(matrix_offset, "<ffffffffffff") + (0, 0, 0, 1))
 		array.shape = (4, 4)
@@ -134,6 +151,7 @@ def parse(data, filename):
 	# vertex blocks
 	vertex_block_offset = bone_offset_base + 0xa0 * bone_count
 	vertex_data = []
+	texture_data = []
 	for _ in xrange(block_count):
 		if vertex_block_offset >= len(data):
 			break
@@ -165,6 +183,7 @@ def parse(data, filename):
 		
 		print "vertex count %d" % vertex_count
 		print "texture index %d" % texture_index
+		texture_data.append(texture_index)
 		print "vertex format bits = %d" % vertex_format_bits
 		print "related bones: ", "|".join([bone_names[related_bone_index] for related_bone_index in related_bone_indices])
 		
@@ -235,7 +254,7 @@ def parse(data, filename):
 		if vertex_block_offset % 0x4 != 0:
 			vertex_block_offset += 4 - vertex_block_offset % 0x4
 	
-	dump_to_obj_file(filename, vertex_data)
+	dump_to_obj_file(filename, vertex_data, texture_data, txl_data)
 
 def make_converter(fmt, fp_shift=1):
 	def convert(data):
@@ -250,6 +269,7 @@ F8CONV = make_converter("<b", 16.0)
 F16CONV = make_converter("<h", 256.0)
 F32CONV = make_converter("<f")
 
+# format vertex format bits to string
 def str_vertex_format(bits):
 	WEIGHTS_CONSTS = map(pspgu_consts.GU_WEIGHTS, range(1, 9, 1))
 	weight_n = WEIGHTS_CONSTS.index(bits & pspgu_consts.GU_WEIGHTS_BITS) + 1
@@ -309,7 +329,10 @@ def str_vertex_format(bits):
 	assert test == 0, "unrecognized bits %d" % bits
 	return format_strings, converters
 		
-def dump_to_obj_file(filename, meshes):
+def dump_to_obj_file(filename, meshes, texture_indices, texture_names):
+	# mapping duplicate vertices to the same index
+	# vertex_map: {vertex_data: index}
+	# meshes2: [mesh0_indices, mesh1_indices, mesh2_indices, ...]
 	vertex_map = {}
 	meshes2 = []
 	base = 0
@@ -324,17 +347,22 @@ def dump_to_obj_file(filename, meshes):
 			
 	f = open(filename, "w")
 	
+	# referencing material file
+	mtl_filename = os.path.split(filename)[1].replace(".obj", ".mtl")
+	obj_name = os.path.splitext(mtl_filename)[0]
+	f.write("mtllib %s\n" % mtl_filename)
+	
 	f.write("# List of Vertices\n")
 	for vertices in meshes:	
 		for vertex in vertices:
 			x, y, z = vertex[-3:]
 			f.write("v %f %f %f\n" % (x, y, z))
 	
-	f.write("# List of Normals\n")
-	for vertices in meshes:	
-		for vertex in vertices:
-			nx, ny, nz = vertex[-6:-3]
-			f.write("vn %f %f %f\n" % (nx, ny, nz))
+	#f.write("# List of Normals\n")
+	#for vertices in meshes:	
+	#	for vertex in vertices:
+	#		nx, ny, nz = vertex[-6:-3]
+	#		f.write("vn %f %f %f\n" % (nx, ny, nz))
 		
 	f.write("# List of Texture Coordinates\n")
 	for vertices in meshes:
@@ -343,40 +371,64 @@ def dump_to_obj_file(filename, meshes):
 			f.write("vt %f %f\n" % (u, 1.0 - v))
 			
 	f.write("# Face Defination\n")
+	f.write("o obj")
 	base = 0
 	for j, vertices in enumerate(meshes):
 		if False and j > 1:
 			base += len(vertices)
 			continue
 		f.write("#	 Mesh %d\n" % j)
-		#for i in xrange(0, len(vertices) - 4, 2):
-		#	
-		#	k1 = meshes2[j][i]
-		#	k2 = meshes2[j][i+1]
-		#	k3 = meshes2[j][i+2]
-		#	k4 = meshes2[j][i+3]
-		#	f.write("f %d//%d %d//%d %d//%d\n" % (k1, k1, k2, k2, k3, k3))
-		#	f.write("f %d//%d %d//%d %d//%d\n" % (k2, k2, k3, k3, k4, k4))
+		f.write("usemtl mat%d\n" % texture_indices[j])
+		f.write("g %s_mesh%d\n" % (obj_name, j))
+		f.write("s 1\n")
 
 		for i in xrange(0, len(vertices)-2, 1):
-			
+			# use 'meshes2' to look up vertex index
 			k1 = meshes2[j][i]
 			k2 = meshes2[j][(i+1) % len(vertices)]
 			k3 = meshes2[j][(i+2) % len(vertices)]
-			f.write("f %d/%d/%d %d/%d/%d %d/%d/%d\n" % (k1, k1, k1, k2, k2, k2, k3, k3, k3))
+			#f.write("f %d/%d/%d %d/%d/%d %d/%d/%d\n" % (k1, k1, k1, k2, k2, k2, k3, k3, k3))
+			f.write("f %d/%d %d/%d %d/%d\n" % (k1, k1, k2, k2, k3, k3))
 			
 		base += len(vertices)
 		
 	f.close()
 	
+	# dump a mtl file
+	
+	mtl_filename = filename.replace(".obj", ".mtl")
+	f = open(mtl_filename, "w")
+	for i, texture_name in enumerate(texture_names):
+		f.write("newmtl mat%d\n" % i)
+		f.write("map_Kd %s\n" % texture_name)
+		f.write("\n")
+	f.close()
+	
 def do_file(mdl_file, out_file):
 	log("filename: %s" % mdl_file)
 	
+	# mdl data
 	fp = open(mdl_file, "rb")
 	data = fp.read()
 	fp.close()
 	
-	parse(data, out_file)
+	# texture name list
+	txl_file = mdl_file.replace(".mdl", ".txl")
+	fp = open(txl_file, "rb")
+	txl_data = parse_txl(fp.read())
+	fp.close()
+	
+	parse(data, txl_data, out_file)
+	
+	# convert textures
+	texture_root = os.path.split(mdl_file)[0]
+	out_root = os.path.split(out_file)[0]
+	
+	for texture_name in txl_data:
+		in_file = os.path.join(texture_root, texture_name).replace("png", "ppt")
+		out_file = os.path.join(out_root, texture_name)
+		ppt_parser.do_file(in_file, out_file)
+	
 	
 if __name__ == '__main__':
 	
