@@ -136,7 +136,11 @@ def parse(data, out_file):
 	image.save(out_file)
 	
 def do_file(in_file, out_file):
-	fp = open(in_file, "rb")
+	try:
+		fp = open(in_file, "rb")
+	except IOError:
+		sys.stderr.write("No such file! %s" % in_file)
+		return
 	data = fp.read()
 	fp.close()
 	
