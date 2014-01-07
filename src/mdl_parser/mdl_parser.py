@@ -190,12 +190,13 @@ def parse(data, txl_data, filename):
 	vertex_data = []
 	texture_data = []
 	prim_types = []
-	for _ in xrange(block_count):
+	for _ in xrange(block_count * 2):
 		if vertex_block_offset >= len(data):
 			break
 
 		vertices, material_index, offset_next, prim_type = parse_vertex_block(_, data, vertex_block_offset, bone_names)
 		texture_index = materials[material_index]
+		print "texture_index = %d" % texture_index
 		vertex_data.append(vertices)
 		texture_data.append(texture_index)
 		tot_verts += len(vertices)
@@ -281,8 +282,8 @@ def parse_header_type2(data, vertex_block_offset):
 	block_total_size = header[1]
 	vertex_format_bits = header[2]
 	vertex_count = header[3]
-	assert header[4] == 0, "must be zero!! %d" % header[4]
-	assert header[5] == 0x80000000, "ddd"
+	#assert header[4] == 0, "must be zero!! %d" % header[4]
+	#assert header[5] == 0x80000000, "ddd"
 	print "unknown part = 0x%x, 0x%x" % tuple(header[4:6])
 	real_weight_count = 0
 	related_bone_indices = []
@@ -305,16 +306,16 @@ def parse_header_type3(data, vertex_block_offset):
 	_G = get_G(data)
 	header = _G(vertex_block_offset, "<IIII")
 	block_total_size = header[1]
-	vertex_format_bits = 412
+	vertex_format_bits = pspgu_consts.GU_VERTEX_16BIT | pspgu_consts.GU_TEXTURE_16BIT | pspgu_consts.GU_NORMAL_16BIT
 	# TODO: vertex_format_bits is wrong.
 	# vertex order: color > vertex
 	# This may be describing a particle
 	vertex_count = header[3]
-	material_index = 0
+	material_index = header[2]
 	related_bone_indices = []
 	header_size = 4 * 0x4
 	raw_header = header[:1]
-	prim_type = pspgu_consts.GU_TRIANGLE_STRIP
+	prim_type = pspgu_consts.GU_TRIANGLE_FAN
 	
 	return block_total_size, vertex_format_bits, vertex_count, material_index, related_bone_indices, raw_header, header_size, prim_type
 	
@@ -363,18 +364,28 @@ def parse_vertex_block(block_idx, data, vertex_block_offset, bone_names):
 		#log("===>vertex %d: offset = 0x%x" % (i, vertex_offset))
 
 		_offset = vertex_offset
+		
 		values = []
-		for count, size, converter in converters:
-			_tmp = []
-			for j in range(count):
-				_tmp.append(converter(data[_offset: _offset + size]))
-				_offset += size
-			values.append(_tmp)
+		if header_type == HEADER_TYPE3:
+			vp = _G(_offset, "<fff")
+			_offset += 4 * 0x4
+			vt = _G(_offset-0x4, "<HH")
+			vt = [vt[0]/256.0, vt[1]/256.0]
+			values = [None, vt, None, None, vp]
+			
+			print "what ever:??", vp, vt
+		else:
+			for count, size, converter in converters:
+				_tmp = []
+				for j in range(count):
+					_tmp.append(converter(data[_offset: _offset + size]))
+					_offset += size
+				values.append(_tmp)
 		
 		w, vt, c, n, vp = values
 		
 		if w:
-			log("w " + (" ".join(map(str,w))))
+			#log("w " + (" ".join(map(str,w))))
 			
 			assert real_weight_count <= len(w), "real weight larger than mem weight n"
 			for weight_i in w[real_weight_count:]:
@@ -399,7 +410,7 @@ def parse_vertex_block(block_idx, data, vertex_block_offset, bone_names):
 		else:
 			nx, ny, nz = None, None, None
 		if vp:
-			log("v " + (" ".join(map(str,vp))))
+			#log("v " + (" ".join(map(str,vp))))
 			x, y, z = vp[:3]
 		else:
 			x, y, z = None, None, None
@@ -417,8 +428,10 @@ def parse_vertex_block(block_idx, data, vertex_block_offset, bone_names):
 	if vertex_block_offset != calc_vertex_block_offset:
 		sys.stderr.write("Size not match! %d %d\n" % (vertex_block_offset, calc_vertex_block_offset))
 		
-	#if header_type == HEADER_TYPE3:
-	#	return [], 0, vertex_block_offset, prim_type
+	if header_type == HEADER_TYPE3:
+		print "SURE!!!!!!!!!!!!!!!!!!", vertices
+		return vertices, 0, vertex_block_offset, prim_type
+		
 	return vertices, material_index, vertex_block_offset, prim_type
 	
 # format vertex format bits to string
@@ -559,6 +572,12 @@ def dump_to_obj_file(filename, meshes, texture_indices, texture_names, prim_type
 				k1 = meshes2[j][i]
 				k2 = meshes2[j][i+1]
 				k3 = meshes2[j][i+2]
+				f.write("f %d/%d %d/%d %d/%d\n" % (k1, k1, k2, k2, k3, k3))
+		elif prim_types[j] == pspgu_consts.GU_TRIANGLE_FAN:
+			for i in xrange(2, len(vertices)):
+				k1 = meshes2[j][0]
+				k2 = meshes2[j][i - 1]
+				k3 = meshes2[j][i]
 				f.write("f %d/%d %d/%d %d/%d\n" % (k1, k1, k2, k2, k3, k3))
 		else:
 			assert False, "unknown prim type %d" % prim_types[j]
