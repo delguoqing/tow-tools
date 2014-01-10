@@ -222,8 +222,14 @@ ani.txt
 *.pyc
 
 #Sample files
-*.mdl
-*.ppt
-*.nod
-*.ani
-*.txl
+tow_dungeons/
+
+*.mdl	# model
+*.ppt	# psp texture
+*.nod	# node
+*.ani	# animation
+*.txl	# texture list
+*.dgn	# dungeon
+*.lgt	# light
+*.pnt
+*.dcon
